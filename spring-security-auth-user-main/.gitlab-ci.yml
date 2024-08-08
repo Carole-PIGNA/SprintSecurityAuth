@@ -1,0 +1,54 @@
+variables:
+  SONAR_USER_HOME: "${CI_PROJECT_DIR}/.sonar"  # Defines the location of the analysis task cache
+  GIT_DEPTH: "0"  # Tells git to fetch all the branches of the project, required by the analysis task
+  SPRING_PROFILES_ACTIVE: test
+stages:
+  - maven-compile
+  - maven-test
+  - sonarcloud-check
+maven-compile:
+  stage: maven-compile
+  image: jelastic/maven:3.9.5-openjdk-21
+  script:
+    - mvn clean compile
+  only:
+    - merge_requests
+    - main
+
+maven-test:
+  stage: maven-test
+  image: jelastic/maven:3.9.5-openjdk-21
+  script:
+    - mvn clean verify jacoco:report
+    - COVERED_RATIO=70
+    - COVERAGE=$( awk -F '</?td>' '{print $17}' target/site/jacoco/index.html | tr -d '<td class="ctr2">')
+    - INT_COVERAGE=$( awk -F '</?td>' '{print $17}' target/site/jacoco/index.html | tr -d '%'| sed -n 's/.*<td class="ctr2">\([^<]*\).*/\1/p')
+    - if [[ "$INT_COVERAGE" -lt $COVERED_RATIO ]]; then
+      echo "Current covered ratio is $COVERAGE, Coverage required must be ${COVERED_RATIO}% or more";
+      exit 1;
+      else
+      echo "============ SUCCESS Coverage ratio $INT_COVERAGE satisfied the coverage conditions > $COVERED_RATIO . =========== ";
+      fi
+  only:
+    - merge_requests
+    - main
+  artifacts:
+    paths:
+      - target/site/jacoco/
+  needs:
+    - maven-compile
+
+sonarcloud-check:
+  stage: sonarcloud-check
+  image: jelastic/maven:3.9.5-openjdk-21
+  cache:
+    key: "${CI_JOB_NAME}"
+    paths:
+      - .sonar/cache
+  script:
+    - mvn verify sonar:sonar -Dsonar.projectKey=web-service-spring-security_spring-security-auth-user
+  only:
+    - merge_requests
+    - main
+  needs:
+    - maven-test
